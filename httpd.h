@@ -33,7 +33,7 @@
 
 #include <ctime>
 #ifndef HTTPDAPI
-    #define HTTPDAPI extern
+    #define HTTPDAPI static
 #endif // HTTPDAPI
 
 #ifdef __GNUC__

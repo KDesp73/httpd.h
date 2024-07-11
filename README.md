@@ -1,6 +1,6 @@
 # httpd.h
 
-A header-only c library that helps you put together an HTTP server
+A header-only c library that helps you quickly put together an HTTP server
 
 ## Dependencies
 

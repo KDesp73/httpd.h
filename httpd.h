@@ -31,7 +31,6 @@
 #ifndef HTTPD_H
 #define HTTPD_H
 
-#include <ctime>
 #ifndef HTTPDAPI
     #define HTTPDAPI static
 #endif // HTTPDAPI
@@ -51,6 +50,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define SERVER_NAME "httpd server"
@@ -323,7 +323,6 @@ HTTPDAPI void log_reguest(request_t req);
 HTTPDAPI void log_response(response_t res);
 
 
-#define HTTPD_IMPLEMENTATION
 #ifdef HTTPD_IMPLEMENTATION
 
 // DAEMON START
@@ -989,6 +988,8 @@ HTTPDAPI server_t server_init(const char* ip, int port, const char* root)
     server.middleware = NULL;
 
     // Add more response methods to server
+    
+    server.response_func = response;
 
     return server;
 }

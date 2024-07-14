@@ -2,10 +2,6 @@
 
 A header-only c library that helps you quickly put together an HTTP server
 
-## Dependencies
-
-The only dependency of this library is the [clib.h](https://github.com/KDesp73/clib.h) utilities library which you can easily include in your project
-
 ## Examples
 
 ### Server

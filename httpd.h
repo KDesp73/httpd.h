@@ -24,7 +24,7 @@
 
 /**
  * @file httpd.h
- * @version v0.0.3
+ * @version v0.0.4
  * @author KDesp73 (Konstantinos Despoinidis)
  */
 
@@ -39,18 +39,19 @@
 #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
 
-#define CLIB_IMPLEMENTATION
-#include "clib.h"
 #include <arpa/inet.h>
+#include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #define SERVER_NAME "httpd server"
@@ -216,7 +217,7 @@ HTTPDAPI int run_server(server_t server);
  * @param request_str The HTTP request
  * @return request_t The parsed request_t struct
  */
-HTTPDAPI request_t parse_request(Cstr request_str);
+HTTPDAPI request_t parse_request(const char* request_str);
 
 /**
  * Makes a response_header_t struct from the content itself
@@ -226,7 +227,7 @@ HTTPDAPI request_t parse_request(Cstr request_str);
  * @param code The HTTP status code
  * @return response_header_t The header struct
  */
-HTTPDAPI response_header_t header_content(Cstr content, Cstr type, size_t code);
+HTTPDAPI response_header_t header_content(const char* content, const char* type, size_t code);
 
 /**
  * Makes a response_header_t struct from the file path
@@ -235,7 +236,7 @@ HTTPDAPI response_header_t header_content(Cstr content, Cstr type, size_t code);
  * @param code The HTTP status code
  * @return response_header_t The header struct
  */
-HTTPDAPI response_header_t header_path(Cstr path, size_t code);
+HTTPDAPI response_header_t header_path(const char* path, size_t code);
 
 /**
  * Determines the appropriate response to the HTTP request
@@ -323,12 +324,157 @@ HTTPDAPI void log_reguest(request_t req);
 HTTPDAPI void log_response(response_t res);
 
 
+#define HTTPD_IMPLEMENTATION
 #ifdef HTTPD_IMPLEMENTATION
 
+// clib.h dependencies 
+// https://github.com/KDesp73/clib.h
+// 
+//
+
+static char* clib_format_text(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    size_t size = vsnprintf(NULL, 0, format, args) + 1; // +1 for the null terminator
+    va_end(args);
+
+    char* formatted_string = (char*) malloc(size);
+    if (formatted_string == NULL) {
+        return NULL;
+    }
+
+    va_start(args, format);
+    vsnprintf(formatted_string, size, format, args);
+    va_end(args);
+
+    formatted_string[size-1] = '\0';
+
+    return formatted_string;
+}
+
+static int clib_file_exists(const char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (file != NULL) {
+        fclose(file);
+        return 1;
+    }
+    return 0;
+}
+
+static char* clib_read_file(const char *filename, const char* mode) {
+    FILE *file = fopen(filename, mode);
+    if (file == NULL) {
+        perror("Error opening file for reading");
+        return NULL;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *buffer = (char*)malloc(file_size + 1);
+    if (buffer == NULL) {
+        perror("Error allocating memory");
+        fclose(file);
+        return NULL;
+    }
+
+    size_t bytesRead = fread(buffer, 1, file_size, file);
+    if (bytesRead != file_size) {
+        perror("Error reading file");
+        free(buffer);
+        fclose(file);
+        return NULL;
+    }
+
+    buffer[file_size] = '\0';
+
+    fclose(file);
+    return buffer;
+}
+
+static char* clib_execute_command(const char* command) {
+    char buffer[128];
+    char *result = NULL;
+    size_t result_size = 0;
+    FILE *pipe = popen(command, "r");
+    if (!pipe) {
+        return NULL;
+    }
+
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        size_t buffer_len = strlen(buffer);
+        result = (char*) realloc(result, result_size + buffer_len + 1);
+        if (!result) {
+            pclose(pipe);
+            return NULL;
+        }
+        strcpy(result + result_size, buffer);
+        result_size += buffer_len;
+    }
+
+    pclose(pipe);
+    return result;
+}
+
+static long clib_file_size(const char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        perror("Error opening file");
+        exit(EXIT_FAILURE);
+    }
+
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fclose(file);
+    return size;
+}
+
+static char* clib_buffer_init()
+{
+    char* buffer = (char*) malloc(1);
+    memset(buffer, 0, 1);
+
+    return buffer;
+}
+
+static void clib_str_append_ln(char** buffer, const char* text)
+{
+    assert(buffer != NULL && *buffer != NULL);
+    assert(text != NULL);
+
+    const char* new_text = clib_format_text("%s\n", text);
+    size_t new_size = strlen(*buffer) + strlen(new_text) + 1;
+    *buffer = (char*) realloc(*buffer, new_size);
+    if (*buffer == NULL) {
+        fprintf(stderr, "[PANIC] Failed to reallocate memory");
+        exit(1);
+    }
+    strcat(*buffer, new_text);
+    free((char*) new_text);
+}
+
+static void clib_str_append(char** buffer, const char* text)
+{
+    assert(buffer != NULL && *buffer != NULL);
+    assert(text != NULL);
+
+    size_t current_size = strlen(*buffer);
+    size_t text_len = strlen(text);
+
+    *buffer = (char*) realloc(*buffer, current_size + text_len + 1);
+    if (*buffer == NULL) {
+        fprintf(stderr, "[PANIC] Failed to reallocate memory");
+    }
+
+    strcat(*buffer, text);
+}
+
+
 // DAEMON START
-void start_daemon(server_t server);
-void stop_daemon(void);
-void restart_daemon(server_t server);
+static void start_daemon(server_t server);
+static void stop_daemon(void);
+static void restart_daemon(server_t server);
 
 HTTPDAPI void daemonize(void) 
 {
@@ -392,12 +538,12 @@ HTTPDAPI void daemonize(void)
     }
 }
 
-void start_daemon(server_t server){
+static void start_daemon(server_t server){
     if(clib_file_exists(PID_PATH)){
         char* old_pid = clib_read_file(PID_PATH, "r");
         if(old_pid != NULL){
             free(old_pid);
-            WARN("Httpd server daemon is active. Restarting...");
+            fprintf(stderr, "[WARN] Httpd server daemon is active. Restarting...");
             restart_daemon(server);
         }
         free(old_pid);
@@ -417,19 +563,19 @@ void start_daemon(server_t server){
     run_server(server);
 }
 
-void stop_daemon(){
+static void stop_daemon(){
     char* pid_str = clib_read_file(PID_PATH, "r");
     if(pid_str == NULL){
-        PANIC("Httpd server daemon is not active");
+        fprintf(stderr, "[PANIC] Httpd server daemon is not active");
     }
 
-    INFO("Stopping daemon...");
+    fprintf(stderr, "[INFO] Stopping daemon...");
     char* command = clib_format_text("kill %s", pid_str);
     clib_execute_command(command);
     free(command);
 }
 
-void restart_daemon(server_t server){
+static void restart_daemon(server_t server){
     stop_daemon();
     start_daemon(server);
 }
@@ -558,7 +704,8 @@ HTTPDAPI const char* status_message(size_t status_code)
     }
     return NULL;
 }
-long get_file_size(const char *file_path) 
+
+static long get_file_size(const char *file_path) 
 {
     FILE *file = fopen(file_path, "rb"); // Open the file in binary mode for reading
     if (file == NULL) {
@@ -572,7 +719,8 @@ long get_file_size(const char *file_path)
 
     return file_size;
 }
-HTTPDAPI response_header_t header_path(Cstr path, size_t code)
+
+HTTPDAPI response_header_t header_path(const char* path, size_t code)
 {
     response_header_t header = {
         .status_code = code,
@@ -588,7 +736,7 @@ HTTPDAPI response_header_t header_path(Cstr path, size_t code)
     return header;
 }
 
-HTTPDAPI response_header_t header_content(Cstr content, Cstr type, size_t code)
+HTTPDAPI response_header_t header_content(const char* content, const char* type, size_t code)
 {
     response_header_t header = {
         .status_code = code,
@@ -606,7 +754,7 @@ HTTPDAPI response_header_t header_content(Cstr content, Cstr type, size_t code)
 }
 
 
-void append_key(char** buffer, const char* key, const char* value)
+static void append_key(char** buffer, const char* key, const char* value)
 {
     if(value == NULL) return;
     if(key == NULL) return;
@@ -640,7 +788,7 @@ HTTPDAPI char* header_str(response_header_t header)
 
 // REQUEST START
 
-HTTPDAPI request_t parse_request(Cstr request_str)
+HTTPDAPI request_t parse_request(const char* request_str)
 {
     request_t parsed_request;
     sscanf(request_str, "%s %s HTTP/1.1", parsed_request.method, parsed_request.path);
@@ -672,7 +820,7 @@ HTTPDAPI const char* response_str(response_t response)
 }
 
 // TODO: Should not use the webc library
-char* ErrorPage(size_t code)
+static char* ErrorPage(size_t code)
 {
     return NULL; // TODO
 }
@@ -688,7 +836,7 @@ HTTPDAPI void clean_response(response_t* response)
     free(response);
 }
 
-int is_image(const char *file_path) 
+static int is_image(const char *file_path) 
 {
     FILE *file = fopen(file_path, "rb");
     if (file == NULL) {
@@ -763,17 +911,17 @@ HTTPDAPI void read_content(response_t* response, const char* path)
 }
 
 
-HTTPDAPI response_t* new_response(Cstr path, Cstr content, Cstr type, size_t code)
+HTTPDAPI response_t* new_response(const char* path, const char* content, const char* type, size_t code)
 {
     if(path == NULL){
         if(content == NULL || type == NULL){
-            PANIC("When path is NULL, content and type must be set");
+            fprintf(stderr, "[PANIC] When path is NULL, content and type must be set");
         }
     }
 
     if(content == NULL || type == NULL){
         if(path == NULL){
-            PANIC("When content and/or type are NULL, path must be set");
+            fprintf(stderr, "[PANIC] When content and/or type are NULL, path must be set");
         }
     }
 
@@ -833,12 +981,12 @@ HTTPDAPI response_t* response(request_t request, const char* root)
 HTTPDAPI int check_server(server_t server)
 {
     if(server.response_func == NULL) {
-        ERRO("Server response function is NULL");
+        fprintf(stderr, "[ERRO] Server response function is NULL");
         return FAILURE;
     }
 
     if(server.root == NULL){
-        ERRO("Server root is NULL");
+        fprintf(stderr, "[ERRO] Server root is NULL");
         return FAILURE;
     }
 
@@ -874,13 +1022,12 @@ HTTPDAPI void send_response(response_t* response, int client_socket)
 
         size_t bytes_sent = send(client_socket, response->chunks[i], response->chunk_sizes[i], 0);
         if(bytes_sent != response->chunk_sizes[i]){
-            ERRO("Sent %zu bytes of chunk[%zu]'s %zu", bytes_sent, i, response->chunk_sizes[i]);
+            fprintf(stderr, "[ERRO] Sent %zu bytes of chunk[%zu]'s %zu", bytes_sent, i, response->chunk_sizes[i]);
         }
-            
     }
 }
 
-void* handle_request(void* arg)
+static void* handle_request(void* arg)
 {
     thread_data_t* thread_data = (thread_data_t*)arg;
     server_t server = thread_data->server;
@@ -903,11 +1050,6 @@ void* handle_request(void* arg)
 
     send_response(response, client_socket);
     log_response(*response);
-#ifdef DEBUG
-    char* res_str = (char*) response_str(*response);
-    clib_write_file("response.txt", res_str, "w");
-    free(res_str);
-#endif
     free(response);
 
     shutdown(client_socket, SHUT_WR);
@@ -1004,20 +1146,20 @@ HTTPDAPI int has_file_extension(const char *path)
     
     if (extension != NULL) {
         if (*(extension + 1) != '\0') {
-            return true;
+            return 1;
         }
     }
     
-    return false;
+    return 0;
 } 
 
 HTTPDAPI int is_index_html_needed(const char *url) 
 {
     size_t url_len = strlen(url);
     if (url_len == 0 || url[url_len - 1] == '/' || !has_file_extension(url)) {
-        return true;
+        return 1;
     } else {
-        return false;
+        return 0;
     }
 }
 

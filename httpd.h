@@ -24,7 +24,7 @@
 
 /**
  * @file httpd.h
- * @version v0.0.4
+ * @version v0.0.5
  * @author KDesp73 (Konstantinos Despoinidis)
  */
 
@@ -60,7 +60,7 @@
 #define MAX_REQUEST_SIZE 1024
 #define MAX_PATH_LENGTH 256
 #define CHUNK_SIZE 1024
-#define PID_PATH clib_format_text("%s/.local/state/webc-daemon.pid", getenv("HOME")) // For daemon
+#define PID_PATH clib_format_text("%s/.local/state/httpd-daemon.pid", getenv("HOME")) // For daemon
 
 typedef char string[256] ;
 

@@ -323,8 +323,6 @@ HTTPDAPI void log_reguest(request_t req);
  */
 HTTPDAPI void log_response(response_t res);
 
-
-#define HTTPD_IMPLEMENTATION
 #ifdef HTTPD_IMPLEMENTATION
 
 // clib.h dependencies 
